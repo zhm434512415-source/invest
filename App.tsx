@@ -198,17 +198,40 @@ const App: React.FC = () => {
   }, [goldTotalValue, fdTotalValue, totalAssets]);
 
   const getPageStyle = (page: NavigationPage): React.CSSProperties => {
+    const levels: Record<NavigationPage, number> = {
+      home: 0,
+      gold: 1,
+      fd: 1,
+      usdFd: 1,
+      expiredFd: 2
+    };
+    const curLevel = levels[currentPage];
+    const targetLevel = levels[page];
+    
     let transform = 'translateX(100%)';
-    let zIndex = 0;
+    let zIndex = 10;
     let pointerEvents: 'auto' | 'none' = 'none';
-    if (currentPage === 'home') {
-      if (page === 'home') { transform = 'translateX(0)'; zIndex = 10; pointerEvents = 'auto'; }
-      else { transform = 'translateX(100%)'; zIndex = 20; }
-    } else {
-      if (page === 'home') { transform = 'translateX(-30%)'; zIndex = 5; }
-      else if (page === currentPage) { transform = 'translateX(0)'; zIndex = 20; pointerEvents = 'auto'; }
+
+    if (page === currentPage) {
+      transform = 'translateX(0)';
+      zIndex = 30;
+      pointerEvents = 'auto';
+    } else if (targetLevel < curLevel) {
+      // 背景层级逻辑：确保上一级页面保持在 -30%
+      if (currentPage === 'expiredFd') {
+        if (page === 'fd' || page === 'usdFd') {
+          transform = 'translateX(-30%)';
+          zIndex = 20;
+        } else if (page === 'home') {
+          transform = 'translateX(-60%)';
+          zIndex = 10;
+        }
+      } else if (curLevel === 1 && page === 'home') {
+        transform = 'translateX(-30%)';
+        zIndex = 20;
+      }
     }
-    return { transform, zIndex, pointerEvents, position: 'absolute', inset: 0, width: '100%', height: '100%', transition: 'transform 0.35s cubic-bezier(0.32, 0.72, 0, 1)' };
+    return { transform, zIndex, pointerEvents, position: 'absolute', inset: 0, width: '100%', height: '100%', transition: 'transform 0.4s cubic-bezier(0.32, 0.72, 0, 1)' };
   };
 
   const inputStyle = "w-full box-border block bg-gray-100 dark:bg-gray-800 p-4 rounded-2xl outline-none text-main border-none text-left appearance-none min-h-[56px] text-base pr-16";
@@ -283,7 +306,7 @@ const App: React.FC = () => {
               <SuffixInput value={v1} onChange={(e: any) => setV1(e.target.value)} placeholder={entryModal.type === 'FD' ? "银行名称" : "模块名称 (如: ETF)"} suffix={entryModal.type === 'FD' ? "BANK" : "TAG"} autoFocus />
             )}
             {(entryModal.type === 'GOLD_REC' || entryModal.type === 'FD') && (
-              <SuffixInput value={v2} onChange={(e: any) => setV2(e.target.value)} type="number" placeholder={entryModal.type === 'FD' ? "存入金额" : (entryModal.recType === 'BUY' ? "买入克重" : "卖出克重")} suffix={entryModal.type === 'FD' ? "元" : "克(g)"} />
+              <SuffixInput value={v2} onChange={(e: any) => setV2(e.target.value)} type="number" placeholder={entryModal.type === 'FD' ? "存入金额" : (entryModal.recType === 'BUY' ? "买入克重" : "卖出克重")} suffix={entryModal.type === 'FD' ? (currency === 'USD' ? "USD" : "元") : "克(g)"} />
             )}
             {(entryModal.type === 'GOLD_REC' || entryModal.type === 'FD') && (
               <SuffixInput value={v3} onChange={(e: any) => setV3(e.target.value)} type="number" step="0.01" placeholder={entryModal.type === 'FD' ? "年化利率" : "单价"} suffix={entryModal.type === 'FD' ? "%" : "元/g"} />
@@ -614,9 +637,23 @@ const App: React.FC = () => {
               <div className={`relative w-32 h-32 flex items-center justify-center flex-shrink-0 transition-all duration-500 ${isPrivate ? 'blur-xl' : ''}`}>
                 <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
                   <circle cx="50" cy="50" r="35" fill="transparent" strokeWidth="15" className="stroke-gray-300 dark:stroke-gray-700" />
-                  <circle cx="50" cy="50" r="35" fill="transparent" strokeWidth="15" strokeDasharray={goldDashArray} strokeLinecap="round" className="stroke-amber-500 dark:stroke-amber-600 transition-all duration-700" />
-                  <circle cx="50" cy="50" r="35" fill="transparent" strokeWidth="15" strokeDasharray={cnyFdDashArray} strokeLinecap="round" className="stroke-blue-500 dark:stroke-blue-600 transition-all duration-700" style={{ strokeDashoffset: `${(assetRatios.gold / 100) * 2 * Math.PI * 35}` }} />
-                  <circle cx="50" cy="50" r="35" fill="transparent" strokeWidth="15" strokeDasharray={usdFdDashArray} strokeLinecap="round" className="stroke-green-500 dark:stroke-green-600 transition-all duration-700" style={{ strokeDashoffset: `${((assetRatios.gold + assetRatios.cnyFd) / 100) * 2 * Math.PI * 35}` }} />
+                  {/* Gold segment */}
+                  <circle cx="50" cy="50" r="35" fill="transparent" strokeWidth="15" 
+                    strokeDasharray={`${(assetRatios.gold / 100) * 2 * Math.PI * 35} ${2 * Math.PI * 35}`} 
+                    strokeLinecap="round" className="stroke-amber-500 dark:stroke-amber-600 transition-all duration-700" 
+                  />
+                  {/* CNY FD segment */}
+                  <circle cx="50" cy="50" r="35" fill="transparent" strokeWidth="15" 
+                    strokeDasharray={`${(assetRatios.cnyFd / 100) * 2 * Math.PI * 35} ${2 * Math.PI * 35}`} 
+                    strokeLinecap="round" className="stroke-blue-500 dark:stroke-blue-600 transition-all duration-700" 
+                    style={{ strokeDashoffset: `-${(assetRatios.gold / 100) * 2 * Math.PI * 35}` }} 
+                  />
+                  {/* USD FD segment */}
+                  <circle cx="50" cy="50" r="35" fill="transparent" strokeWidth="15" 
+                    strokeDasharray={`${(assetRatios.usdFd / 100) * 2 * Math.PI * 35} ${2 * Math.PI * 35}`} 
+                    strokeLinecap="round" className="stroke-green-500 dark:stroke-green-600 transition-all duration-700" 
+                    style={{ strokeDashoffset: `-${((assetRatios.gold + assetRatios.cnyFd) / 100) * 2 * Math.PI * 35}` }} 
+                  />
                 </svg>
                 <div className="absolute inset-0 flex flex-col items-center justify-center"> <span className="text-[8px] font-black text-tertiary uppercase tracking-tighter">RATIO</span> </div>
               </div>
@@ -661,7 +698,10 @@ const App: React.FC = () => {
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
-                  <p className={`font-black text-2xl text-main transition-all tracking-tighter ${isPrivate ? 'blur-md' : ''}`}>${f2(usdFdTotalValue)} (¥{f2(usdFdTotalValueCny)})</p>
+                  <div className="flex flex-col items-end">
+                    <p className={`font-black text-2xl text-main transition-all tracking-tighter leading-none ${isPrivate ? 'blur-md' : ''}`}>${f2(usdFdTotalValue)}</p>
+                    <p className={`text-[10px] font-bold text-tertiary opacity-70 mt-1 transition-all ${isPrivate ? 'blur-[3px]' : ''}`}>≈¥{f2(usdFdTotalValueCny)}</p>
+                  </div>
                   <ChevronRight className="text-tertiary" size={20} />
                 </div>
               </button>
