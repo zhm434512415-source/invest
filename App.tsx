@@ -576,6 +576,11 @@ const App: React.FC = () => {
       const circumference = 2 * Math.PI * radius;
       return `${(assetRatios.cnyFd / 100) * circumference} ${circumference}`;
     }, [assetRatios.cnyFd]);
+    const usdFdDashArray = useMemo(() => {
+      const radius = 35;
+      const circumference = 2 * Math.PI * radius;
+      return `${(assetRatios.usdFd / 100) * circumference} ${circumference}`;
+    }, [assetRatios.usdFd]);
     return (
       <div className="h-full flex flex-col bg-[#f2f2f7] dark:bg-black">
         <NavBar title="资产组合" />
@@ -611,6 +616,7 @@ const App: React.FC = () => {
                   <circle cx="50" cy="50" r="35" fill="transparent" strokeWidth="15" className="stroke-gray-300 dark:stroke-gray-700" />
                   <circle cx="50" cy="50" r="35" fill="transparent" strokeWidth="15" strokeDasharray={goldDashArray} strokeLinecap="round" className="stroke-amber-500 dark:stroke-amber-600 transition-all duration-700" />
                   <circle cx="50" cy="50" r="35" fill="transparent" strokeWidth="15" strokeDasharray={cnyFdDashArray} strokeLinecap="round" className="stroke-blue-500 dark:stroke-blue-600 transition-all duration-700" style={{ strokeDashoffset: `${(assetRatios.gold / 100) * 2 * Math.PI * 35}` }} />
+                  <circle cx="50" cy="50" r="35" fill="transparent" strokeWidth="15" strokeDasharray={usdFdDashArray} strokeLinecap="round" className="stroke-green-500 dark:stroke-green-600 transition-all duration-700" style={{ strokeDashoffset: `${((assetRatios.gold + assetRatios.cnyFd) / 100) * 2 * Math.PI * 35}` }} />
                 </svg>
                 <div className="absolute inset-0 flex flex-col items-center justify-center"> <span className="text-[8px] font-black text-tertiary uppercase tracking-tighter">RATIO</span> </div>
               </div>
