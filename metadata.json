@@ -1,0 +1,5 @@
+{
+  "name": "iOS Investment Tracker",
+  "description": "A high-fidelity iOS-style investment tracking application for Gold and Fixed Deposits with local storage and undo/redo capabilities.",
+  "requestFramePermissions": []
+}
