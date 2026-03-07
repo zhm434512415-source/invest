@@ -247,6 +247,7 @@ const App: React.FC = () => {
     const [v1, setV1] = useState(''); const [v2, setV2] = useState(''); 
     const [v3, setV3] = useState(''); const [v4, setV4] = useState('');
     const [v5, setV5] = useState(new Date().toISOString().split('T')[0]); const [v6, setV6] = useState('');
+    const [vInterest, setVInterest] = useState('');
     const isPhysicalGold = entryModal.catId && data.goldCategories.find(c => c.id === entryModal.catId)?.name === PHYSICAL_GOLD_NAME;
     const currency = entryModal.currency || 'CNY';
     if (!entryModal.show) return null;
@@ -272,27 +273,35 @@ const App: React.FC = () => {
           }
           updateData(d => ({ ...d, goldCategories: d.goldCategories.map(c => c.id === entryModal.catId ? { ...c, records: [...c.records, { id: crypto.randomUUID(), type: entryModal.recType!, weight: w, price: p, date: v5, total: t }] } : c) }));
         } else {
-          let w = parseFloat(v2); let p = parseFloat(v3); let t = parseFloat(v4); let fee = parseFloat(v6) || 0;
+          let w = parseFloat(v2); let p = parseFloat(v3); let received = parseFloat(v4); let fee = parseFloat(v6) || 0;
+          let t: number;
           if (isPhysicalGold) {
             if (isNaN(w) || isNaN(p) || !v5) return;
             t = w * p;
           } else {
-            if ((isNaN(w) && isNaN(t)) || !v5) return;
+            if ((isNaN(w) && isNaN(received)) || !v5) return;
             if (!isNaN(w) && !isNaN(p)) {
               t = w * p;
-            } else if (!isNaN(w) && !isNaN(t)) {
+            } else if (!isNaN(w) && !isNaN(received)) {
+              t = received + fee;
               p = t / w;
-            } else if (!isNaN(p) && !isNaN(t)) {
+            } else if (!isNaN(p) && !isNaN(received)) {
+              t = received + fee;
               w = t / p;
+            } else {
+              t = received + fee;
             }
           }
           updateData(d => ({ ...d, goldCategories: d.goldCategories.map(c => c.id === entryModal.catId ? { ...c, records: [...c.records, { id: crypto.randomUUID(), type: entryModal.recType!, weight: w, price: p, date: v5, total: t, fee }] } : c) }));
         }
       } else if (entryModal.type === 'FD') {
         const amt = parseFloat(v2); const rate = parseFloat(v3); const months = parseInt(v4);
+        const manualInterest = parseFloat(vInterest);
         if (!v1 || isNaN(amt) || isNaN(rate) || isNaN(months) || !v5) return;
         const d_end = new Date(v5); d_end.setMonth(d_end.getMonth() + months);
-        updateData(d => ({ ...d, fixedDeposits: [...d.fixedDeposits, { id: crypto.randomUUID(), bank: v1, amount: amt, annualRate: rate, durationMonths: months, startDate: v5, endDate: d_end.toISOString().split('T')[0], interest: amt * (rate/100) * (months/12), currency }] }));
+        const calcInterest = amt * (rate/100) * (months/12);
+        const finalInterest = !isNaN(manualInterest) ? manualInterest : calcInterest;
+        updateData(d => ({ ...d, fixedDeposits: [...d.fixedDeposits, { id: crypto.randomUUID(), bank: v1, amount: amt, annualRate: rate, durationMonths: months, startDate: v5, endDate: d_end.toISOString().split('T')[0], interest: finalInterest, currency }] }));
       }
       setEntryModal({ ...entryModal, show: false });
     };
@@ -312,12 +321,13 @@ const App: React.FC = () => {
               <SuffixInput value={v3} onChange={(e: any) => setV3(e.target.value)} type="number" step="0.01" placeholder={entryModal.type === 'FD' ? "年化利率" : "单价"} suffix={entryModal.type === 'FD' ? "%" : "元/g"} />
             )}
             {entryModal.type === 'GOLD_REC' && !isPhysicalGold && (
-              <SuffixInput value={v4} onChange={(e: any) => setV4(e.target.value)} type="number" step="0.01" placeholder={entryModal.recType === 'BUY' ? "买入总价" : "卖出金额"} suffix="元" />
+              <SuffixInput value={v4} onChange={(e: any) => setV4(e.target.value)} type="number" step="0.01" placeholder={entryModal.recType === 'BUY' ? "买入总价" : "到手金额"} suffix="元" />
             )}
             {entryModal.type === 'GOLD_REC' && entryModal.recType === 'SELL' && !isPhysicalGold && (
-              <SuffixInput value={v6} onChange={(e: any) => setV6(e.target.value)} type="number" step="0.01" placeholder="手续费" suffix="元" />
+              <SuffixInput value={v6} onChange={(e: any) => setV6(e.target.value)} type="number" step="0.01" placeholder="已扣手续费" suffix="元" />
             )}
             {entryModal.type === 'FD' && ( <SuffixInput value={v4} onChange={(e: any) => setV4(e.target.value)} type="number" placeholder="存期 (月)" suffix="月" /> )}
+            {entryModal.type === 'FD' && ( <SuffixInput value={vInterest} onChange={(e: any) => setVInterest(e.target.value)} type="number" step="0.01" placeholder="预计利息 (选填)" suffix={currency === 'USD' ? "USD" : "元"} /> )}
             {(entryModal.type === 'GOLD_REC' || entryModal.type === 'FD') && ( <SuffixInput value={v5} onChange={(e: any) => setV5(e.target.value)} type="date" suffix="DATE" /> )}
           </div>
           <div className="flex gap-3 mt-8">
@@ -338,10 +348,15 @@ const App: React.FC = () => {
         setEditW(editForm.record.weight.toString()); 
         setEditP(editForm.record.price.toString()); 
         setEditD(editForm.record.date);
-        setEditT(editForm.record.total.toString());
+        
+        if (editForm.record.type === 'SELL' && !isPhysicalGold) {
+          setEditT((editForm.record.total - (editForm.record.fee || 0)).toString());
+        } else {
+          setEditT(editForm.record.total.toString());
+        }
         setEditFee(editForm.record.fee?.toString() || '');
       } 
-    }, [editForm]);
+    }, [editForm, isPhysicalGold]);
     const handleUpdateRecord = () => {
       if (!editForm) return;
       if (editForm.record.type === 'BUY') {
@@ -361,18 +376,23 @@ const App: React.FC = () => {
         }
         updateData(d => ({ ...d, goldCategories: d.goldCategories.map(c => c.id === editForm.catId ? { ...c, records: c.records.map(r => r.id === editForm.record.id ? { ...r, weight: w, price: p, date: editD, total: t } : r) } : c) }));
       } else {
-        let w = parseFloat(editW); let p = parseFloat(editP); let t = parseFloat(editT); let fee = parseFloat(editFee) || 0;
+        let w = parseFloat(editW); let p = parseFloat(editP); let received = parseFloat(editT); let fee = parseFloat(editFee) || 0;
+        let t: number;
         if (isPhysicalGold) {
           if (isNaN(w) || isNaN(p) || !editD) return;
           t = w * p;
         } else {
-          if ((isNaN(w) && isNaN(t)) || !editD) return;
+          if ((isNaN(w) && isNaN(received)) || !editD) return;
           if (!isNaN(w) && !isNaN(p)) {
             t = w * p;
-          } else if (!isNaN(w) && !isNaN(t)) {
+          } else if (!isNaN(w) && !isNaN(received)) {
+            t = received + fee;
             p = t / w;
-          } else if (!isNaN(p) && !isNaN(t)) {
+          } else if (!isNaN(p) && !isNaN(received)) {
+            t = received + fee;
             w = t / p;
+          } else {
+            t = received + fee;
           }
         }
         updateData(d => ({ ...d, goldCategories: d.goldCategories.map(c => c.id === editForm.catId ? { ...c, records: c.records.map(r => r.id === editForm.record.id ? { ...r, weight: w, price: p, date: editD, total: t, fee } : r) } : c) }));
@@ -414,10 +434,10 @@ const App: React.FC = () => {
                 <SuffixInput value={editW} onChange={(e: any) => setEditW(e.target.value)} type="number" placeholder="重量" suffix="克(g)" />
                 <SuffixInput value={editP} onChange={(e: any) => setEditP(e.target.value)} type="number" step="0.01" placeholder="单价" suffix="元/g" />
                 {!isPhysicalGold && (
-                  <SuffixInput value={editT} onChange={(e: any) => setEditT(e.target.value)} type="number" step="0.01" placeholder={editForm.record.type === 'BUY' ? "买入总价" : "卖出金额"} suffix="元" />
+                  <SuffixInput value={editT} onChange={(e: any) => setEditT(e.target.value)} type="number" step="0.01" placeholder={editForm.record.type === 'BUY' ? "买入总价" : "到手金额"} suffix="元" />
                 )}
                 {editForm.record.type === 'SELL' && !isPhysicalGold && (
-                  <SuffixInput value={editFee} onChange={(e: any) => setEditFee(e.target.value)} type="number" step="0.01" placeholder="手续费" suffix="元" />
+                  <SuffixInput value={editFee} onChange={(e: any) => setEditFee(e.target.value)} type="number" step="0.01" placeholder="已扣手续费" suffix="元" />
                 )}
                 <SuffixInput value={editD} onChange={(e: any) => setEditD(e.target.value)} type="date" suffix="DATE" />
               </div>
@@ -448,13 +468,17 @@ const App: React.FC = () => {
 
   const FDModals = () => {
     const [vBank, setVBank] = useState(''); const [vAmt, setVAmt] = useState(''); const [vRate, setVRate] = useState(''); const [vDur, setVDur] = useState(''); const [vDate, setVDate] = useState('');
-    useEffect(() => { if (fdEditForm) { setVBank(fdEditForm.bank); setVAmt(fdEditForm.amount.toString()); setVRate(fdEditForm.annualRate.toString()); setVDur(fdEditForm.durationMonths.toString()); setVDate(fdEditForm.startDate); } }, [fdEditForm]);
+    const [vInterest, setVInterest] = useState('');
+    useEffect(() => { if (fdEditForm) { setVBank(fdEditForm.bank); setVAmt(fdEditForm.amount.toString()); setVRate(fdEditForm.annualRate.toString()); setVDur(fdEditForm.durationMonths.toString()); setVDate(fdEditForm.startDate); setVInterest(fdEditForm.interest.toString()); } }, [fdEditForm]);
     const handleUpdateFD = () => {
       if (!fdEditForm) return;
       const amt = parseFloat(vAmt); const rate = parseFloat(vRate); const months = parseInt(vDur);
+      const manualInterest = parseFloat(vInterest);
       if (!vBank || isNaN(amt) || isNaN(rate) || isNaN(months) || !vDate) return;
       const d_end = new Date(vDate); d_end.setMonth(d_end.getMonth() + months);
-      updateData(d => ({ ...d, fixedDeposits: d.fixedDeposits.map(f => f.id === fdEditForm.id ? { ...f, bank: vBank, amount: amt, annualRate: rate, durationMonths: months, startDate: vDate, endDate: d_end.toISOString().split('T')[0], interest: amt * (rate/100) * (months/12) } : f) }));
+      const calcInterest = amt * (rate/100) * (months/12);
+      const finalInterest = !isNaN(manualInterest) ? manualInterest : calcInterest;
+      updateData(d => ({ ...d, fixedDeposits: d.fixedDeposits.map(f => f.id === fdEditForm.id ? { ...f, bank: vBank, amount: amt, annualRate: rate, durationMonths: months, startDate: vDate, endDate: d_end.toISOString().split('T')[0], interest: finalInterest } : f) }));
       setFdEditForm(null);
     };
     const handleDeleteFD = () => { if (fdDeleteConfirm) { updateData(d => ({ ...d, fixedDeposits: d.fixedDeposits.filter(f => f.id !== fdDeleteConfirm) })); setFdDeleteConfirm(null); setFdMenu(null); } };
@@ -504,6 +528,7 @@ const App: React.FC = () => {
                 <SuffixInput value={vAmt} onChange={(e: any) => setVAmt(e.target.value)} type="number" placeholder="金额" suffix={fdEditForm.currency === 'CNY' ? "元" : "$"} />
                 <SuffixInput value={vRate} onChange={(e: any) => setVRate(e.target.value)} type="number" step="0.01" placeholder="利率" suffix="%" />
                 <SuffixInput value={vDur} onChange={(e: any) => setVDur(e.target.value)} type="number" placeholder="存期" suffix="月" />
+                <SuffixInput value={vInterest} onChange={(e: any) => setVInterest(e.target.value)} type="number" step="0.01" placeholder="预计利息 (选填)" suffix={fdEditForm.currency === 'CNY' ? "元" : "$"} />
                 <SuffixInput value={vDate} onChange={(e: any) => setVDate(e.target.value)} type="date" suffix="DATE" />
               </div>
               <div className="flex gap-3 mt-8">
@@ -745,12 +770,12 @@ const App: React.FC = () => {
                             <p className="text-[10px] font-bold text-tertiary tracking-wide">{rec.date}</p>
                             <p className="font-black text-base text-main leading-tight"> {rec.type === 'BUY' ? '买入' : '卖出'} {f2(rec.weight)}g </p>
                             <p className="text-secondary font-bold text-xs opacity-80"> 单价: {f2(rec.price)}元/g </p>
-                            {!isPhysical && rec.type === 'SELL' && rec.fee && (
+                            {!isPhysical && rec.type === 'SELL' && typeof rec.fee === 'number' && rec.fee > 0 && (
                               <p className="text-secondary font-bold text-xs opacity-80"> 手续费: ¥{f2(rec.fee)} </p>
                             )}
                           </div>
                         </div>
-                        <div className={`text-right transition-all ${isPrivate ? 'blur-md' : ''}`}> <p className="font-black text-2xl text-main tracking-tighter">¥{f2(rec.total)}</p> </div>
+                        <div className={`text-right transition-all ${isPrivate ? 'blur-md' : ''}`}> <p className="font-black text-2xl text-main tracking-tighter">¥{f2(rec.type === 'SELL' && !isPhysical ? Math.max(0, rec.total - (rec.fee || 0)) : rec.total)}</p> </div>
                       </div>
                     ))
                   }
