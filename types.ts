@@ -29,7 +29,17 @@ export interface FixedDeposit {
   interest: number;
   isWithdrawn?: boolean;
   currency: 'CNY' | 'USD';
+  isDemandDeposit?: boolean;
 }
+
+export interface AssetSnapshot {
+  timestamp: number;
+  goldWeight: number;
+  cnyAssets: number;
+  usdAssets: number;
+}
+
+export type TimeDimension = 'month' | 'quarter' | 'year';
 
 export type SortField = 'startDate' | 'endDate' | 'amount' | 'bank';
 export type SortOrder = 'asc' | 'desc';
@@ -44,6 +54,9 @@ export interface AppState {
   darkMode: boolean;
   referenceGoldPrice: number;
   referenceUsdRate: number;
+  demandDepositAmount: number;
+  assetSnapshots: AssetSnapshot[];
+  timeDimension: TimeDimension;
 }
 
 export type NavigationPage = 'home' | 'gold' | 'fd' | 'usdFd' | 'expiredFd';

@@ -34,7 +34,9 @@ import {
   NavigationPage, 
   SortField, 
   SortOrder,
-  TransactionType
+  TransactionType,
+  AssetSnapshot,
+  TimeDimension
 } from './types.ts';
 
 const STORAGE_KEY = 'ios_invest_tracker_v21';
@@ -48,6 +50,8 @@ interface DataState {
   fixedDeposits: FixedDeposit[];
   referenceGoldPrice: number;
   referenceUsdRate: number;
+  demandDepositAmount: number;
+  assetSnapshots: AssetSnapshot[];
 }
 
 const App: React.FC = () => {
@@ -56,6 +60,8 @@ const App: React.FC = () => {
     fixedDeposits: [],
     referenceGoldPrice: 550,
     referenceUsdRate: 7.0,
+    demandDepositAmount: 0,
+    assetSnapshots: [],
   });
   const [history, setHistory] = useState<DataState[]>([]);
   const [historyPointer, setHistoryPointer] = useState(-1);
@@ -70,6 +76,11 @@ const App: React.FC = () => {
   const [tempUsdRate, setTempUsdRate] = useState('');
   const [fdSort, setFdSort] = useState<{ field: SortField, order: SortOrder }>({ field: 'startDate', order: 'desc' });
   const [isInitialized, setIsInitialized] = useState(false);
+  const [showDemandDepositModal, setShowDemandDepositModal] = useState(false);
+  const [tempDemandDeposit, setTempDemandDeposit] = useState('');
+  const [timeDimension, setTimeDimension] = useState<TimeDimension>('month');
+  const [savedTimeDimension, setSavedTimeDimension] = useState<TimeDimension>('month');
+  const [tablePage, setTablePage] = useState(0);
 
   // Modals state
   const [recordMenu, setRecordMenu] = useState<{ catId: string, record: GoldRecord } | null>(null);
@@ -114,14 +125,18 @@ const App: React.FC = () => {
           fixedDeposits: parsed.fixedDeposits || [],
           referenceGoldPrice: parsed.referenceGoldPrice ?? 550,
           referenceUsdRate: parsed.referenceUsdRate ?? 7.0,
+          demandDepositAmount: parsed.demandDepositAmount ?? 0,
+          assetSnapshots: parsed.assetSnapshots || [],
         };
         setDarkMode(parsed.darkMode ?? true);
         setFdSort(parsed.fixedDepositSort ?? { field: 'startDate', order: 'desc' });
+        setTimeDimension(parsed.timeDimension ?? 'month');
+        setSavedTimeDimension(parsed.timeDimension ?? 'month');
       } catch (e) {
-        initialData = { goldCategories: [], fixedDeposits: [], referenceGoldPrice: 550, referenceUsdRate: 7.0 };
+        initialData = { goldCategories: [], fixedDeposits: [], referenceGoldPrice: 550, referenceUsdRate: 7.0, demandDepositAmount: 0, assetSnapshots: [] };
       }
     } else {
-      initialData = { goldCategories: [], fixedDeposits: [], referenceGoldPrice: 550, referenceUsdRate: 7.0 };
+      initialData = { goldCategories: [], fixedDeposits: [], referenceGoldPrice: 550, referenceUsdRate: 7.0, demandDepositAmount: 0, assetSnapshots: [] };
     }
     if (!initialData.goldCategories.find(c => c.name === PHYSICAL_GOLD_NAME)) {
       initialData.goldCategories.unshift({ id: 'physical-gold-default', name: PHYSICAL_GOLD_NAME, records: [], isExpanded: true });
@@ -134,10 +149,10 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (isInitialized) {
-      const currentFullState = { ...data, darkMode, fixedDepositSort: fdSort };
+      const currentFullState = { ...data, darkMode, fixedDepositSort: fdSort, timeDimension };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(currentFullState));
     }
-  }, [data, darkMode, fdSort, isInitialized]);
+  }, [data, darkMode, fdSort, timeDimension, isInitialized]);
 
   // 同步系统 UI 颜色
   useEffect(() => {
@@ -188,9 +203,25 @@ const App: React.FC = () => {
   }, [data.goldCategories, data.referenceGoldPrice]);
 
   const goldTotalValue = useMemo(() => goldAnalysis.reduce((acc, curr) => acc + curr.valuation, 0), [goldAnalysis]);
-  const activeFd = useMemo(() => data.fixedDeposits.filter(f => !f.isWithdrawn), [data.fixedDeposits]);
-  const fdTotalValue = useMemo(() => activeFd.reduce((acc, curr) => acc + curr.amount, 0), [activeFd]);
-  const totalAssets = useMemo(() => goldTotalValue + fdTotalValue, [goldTotalValue, fdTotalValue]);
+  const activeFd = useMemo(() => data.fixedDeposits.filter(f => !f.isWithdrawn && !f.isDemandDeposit), [data.fixedDeposits]);
+  const fdTotalValue = useMemo(() => activeFd.reduce((acc, curr) => acc + (curr.currency === 'CNY' ? curr.amount : curr.amount * data.referenceUsdRate), 0), [activeFd, data.referenceUsdRate]);
+  const totalAssets = useMemo(() => goldTotalValue + fdTotalValue + data.demandDepositAmount, [goldTotalValue, fdTotalValue, data.demandDepositAmount]);
+
+  const totalGoldWeight = useMemo(() => goldAnalysis.reduce((acc, curr) => acc + curr.currentWeight, 0), [goldAnalysis]);
+  const cnyFdAmount = useMemo(() => data.fixedDeposits.filter(f => f.currency === 'CNY' && !f.isWithdrawn && !f.isDemandDeposit).reduce((acc, curr) => acc + curr.amount, 0), [data.fixedDeposits]);
+  const usdFdAmount = useMemo(() => data.fixedDeposits.filter(f => f.currency === 'USD' && !f.isWithdrawn && !f.isDemandDeposit).reduce((acc, curr) => acc + curr.amount, 0), [data.fixedDeposits]);
+
+  useEffect(() => {
+    if (isInitialized && (totalGoldWeight > 0 || cnyFdAmount > 0 || usdFdAmount > 0 || data.demandDepositAmount > 0)) {
+      const newSnapshot: AssetSnapshot = {
+        timestamp: Date.now(),
+        goldWeight: totalGoldWeight,
+        cnyAssets: cnyFdAmount + data.demandDepositAmount,
+        usdAssets: usdFdAmount,
+      };
+      updateData(d => ({ ...d, assetSnapshots: [...d.assetSnapshots, newSnapshot] }));
+    }
+  }, [totalGoldWeight, cnyFdAmount, usdFdAmount, data.demandDepositAmount, isInitialized]);
 
   const assetRatios = useMemo(() => {
     if (totalAssets === 0) return { gold: 0, fd: 0 };
@@ -235,6 +266,187 @@ const App: React.FC = () => {
   };
 
   const inputStyle = "w-full box-border block bg-gray-100 dark:bg-gray-800 p-4 rounded-2xl outline-none text-main border-none text-left appearance-none min-h-[56px] text-base pr-16";
+
+  const aggregateSnapshots = useMemo(() => {
+    if (data.assetSnapshots.length === 0) return [];
+    
+    const grouped: Record<string, AssetSnapshot> = {};
+    
+    data.assetSnapshots.forEach(snapshot => {
+      const date = new Date(snapshot.timestamp);
+      let key: string;
+      
+      if (timeDimension === 'month') {
+        key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      } else if (timeDimension === 'quarter') {
+        const quarter = Math.floor(date.getMonth() / 3) + 1;
+        key = `${date.getFullYear()}-Q${quarter}`;
+      } else {
+        key = `${date.getFullYear()}`;
+      }
+      
+      if (!grouped[key] || snapshot.timestamp > grouped[key].timestamp) {
+        grouped[key] = snapshot;
+      }
+    });
+    
+    const sorted = Object.entries(grouped)
+      .map(([key, snapshot]) => ({
+        key,
+        ...snapshot,
+        label: timeDimension === 'month' 
+          ? key.substring(5) + '月' 
+          : timeDimension === 'quarter' 
+            ? key.replace('-Q', '年Q')
+            : key + '年',
+      }))
+      .sort((a, b) => a.timestamp - b.timestamp);
+    
+    return sorted;
+  }, [data.assetSnapshots, timeDimension]);
+
+  const chartData = useMemo(() => {
+    return aggregateSnapshots.map(item => {
+      const total = item.goldWeight * data.referenceGoldPrice + item.cnyAssets + item.usdAssets * data.referenceUsdRate;
+      return { ...item, total };
+    });
+  }, [aggregateSnapshots, data.referenceGoldPrice, data.referenceUsdRate]);
+
+  const AssetTable = () => {
+    const ITEMS_PER_PAGE = 12;
+    
+    const calculateGrowth = () => {
+      if (chartData.length === 0) return [];
+      
+      const result = chartData.map((current, index) => {
+        const prevIndex = index + 1;
+        const previous = prevIndex < chartData.length ? chartData[prevIndex] : null;
+        
+        const netGrowth = previous ? current.total - previous.total : null;
+        const growthRate = previous && previous.total > 0 ? (netGrowth! / previous.total) * 100 : null;
+        
+        return {
+          ...current,
+          netGrowth,
+          growthRate,
+        };
+      });
+      
+      return result;
+    };
+
+    const growthData = calculateGrowth();
+    const totalPages = Math.ceil(growthData.length / ITEMS_PER_PAGE);
+    const startIndex = tablePage * ITEMS_PER_PAGE;
+    const endIndex = startIndex + ITEMS_PER_PAGE;
+    const currentPageData = growthData.slice(startIndex, endIndex);
+
+    const handleTimeDimensionChange = (dim: TimeDimension) => {
+      setTimeDimension(dim);
+      setTablePage(0);
+    };
+
+    if (chartData.length === 0) {
+      return (
+        <div className="flex flex-col items-center justify-center py-12 text-tertiary">
+          <RefreshCw size={48} className="opacity-40 mb-4" />
+          <p className="text-sm font-bold">暂无数据</p>
+          <p className="text-xs opacity-60 mt-1">修改资产后会自动记录</p>
+        </div>
+      );
+    }
+
+    const formatCurrency = (value: number) => {
+      if (value >= 10000) {
+        return `¥${(value / 10000).toFixed(1)}万`;
+      }
+      return `¥${f2(value)}`;
+    };
+
+    const formatGrowth = (value: number | null) => {
+      if (value === null) return '-';
+      const sign = value >= 0 ? '+' : '';
+      if (Math.abs(value) >= 10000) {
+        return `${sign}¥${(value / 10000).toFixed(1)}万`;
+      }
+      return `${sign}¥${f2(value)}`;
+    };
+
+    const formatRate = (value: number | null) => {
+      if (value === null) return '-';
+      const sign = value >= 0 ? '+' : '';
+      return `${sign}${value.toFixed(2)}%`;
+    };
+
+    return (
+      <div className="overflow-hidden">
+        <div className="flex gap-1.5 mb-4">
+          {[{ value: 'month' as TimeDimension, label: '月' }, { value: 'quarter' as TimeDimension, label: '季度' }, { value: 'year' as TimeDimension, label: '年' }].map(dim => (
+            <button
+              key={dim.value}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleTimeDimensionChange(dim.value);
+              }}
+              className={`px-3 py-1.5 rounded-xl text-[10px] font-black transition-all ${timeDimension === dim.value ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-800 text-secondary'}`}
+            >
+              {dim.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-[11px]">
+            <thead>
+              <tr className="border-b border-gray-200 dark:border-gray-700">
+                <th className="text-left py-3 px-2 font-black text-secondary uppercase tracking-wider">日期</th>
+                <th className="text-right py-3 px-2 font-black text-secondary uppercase tracking-wider">总资产</th>
+                <th className="text-right py-3 px-2 font-black text-secondary uppercase tracking-wider">净增长</th>
+                <th className="text-right py-3 px-2 font-black text-secondary uppercase tracking-wider">增长率</th>
+              </tr>
+            </thead>
+            <tbody>
+              {currentPageData.map((item, index) => (
+                <tr key={item.key} className={`border-b border-gray-100 dark:border-gray-800 ${index % 2 === 0 ? 'bg-gray-50/50 dark:bg-black/30' : ''}`}>
+                  <td className="py-3 px-2 font-bold text-main">{item.label}</td>
+                  <td className={`py-3 px-2 text-right font-black ${isPrivate ? 'blur-md' : ''}`}>{formatCurrency(item.total)}</td>
+                  <td className={`py-3 px-2 text-right font-black ${isPrivate ? 'blur-md' : ''} ${item.netGrowth !== null && item.netGrowth >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {formatGrowth(item.netGrowth)}
+                  </td>
+                  <td className={`py-3 px-2 text-right font-black ${isPrivate ? 'blur-md' : ''} ${item.growthRate !== null && item.growthRate >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {formatRate(item.growthRate)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {totalPages > 1 && (
+          <div className="flex items-center justify-center gap-4 mt-4 pt-4 border-t border-gray-100 dark:border-gray-800">
+            <button
+              onClick={() => setTablePage(p => Math.max(0, p - 1))}
+              disabled={tablePage === 0}
+              className="px-4 py-2 rounded-xl text-xs font-black transition-all disabled:opacity-20 disabled:cursor-not-allowed bg-gray-100 dark:bg-gray-800 text-secondary hover:bg-gray-200 dark:hover:bg-gray-700"
+            >
+              上一页
+            </button>
+            <span className="text-xs font-bold text-tertiary">
+              {tablePage + 1} / {totalPages}
+            </span>
+            <button
+              onClick={() => setTablePage(p => Math.min(totalPages - 1, p + 1))}
+              disabled={tablePage >= totalPages - 1}
+              className="px-4 py-2 rounded-xl text-xs font-black transition-all disabled:opacity-20 disabled:cursor-not-allowed bg-gray-100 dark:bg-gray-800 text-secondary hover:bg-gray-200 dark:hover:bg-gray-700"
+            >
+              下一页
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const SuffixInput = ({ value, onChange, placeholder, suffix, type = "text", autoFocus = false }: any) => (
     <div className="relative flex items-center">
@@ -599,36 +811,22 @@ const App: React.FC = () => {
   );
 
   const Home = () => {
-    const cnyFd = useMemo(() => data.fixedDeposits.filter(f => f.currency === 'CNY' && !f.isWithdrawn), [data.fixedDeposits]);
-    const usdFd = useMemo(() => data.fixedDeposits.filter(f => f.currency === 'USD' && !f.isWithdrawn), [data.fixedDeposits]);
+    const cnyFd = useMemo(() => data.fixedDeposits.filter(f => f.currency === 'CNY' && !f.isWithdrawn && !f.isDemandDeposit), [data.fixedDeposits]);
+    const usdFd = useMemo(() => data.fixedDeposits.filter(f => f.currency === 'USD' && !f.isWithdrawn && !f.isDemandDeposit), [data.fixedDeposits]);
     const cnyFdTotalValue = useMemo(() => cnyFd.reduce((acc, curr) => acc + curr.amount, 0), [cnyFd]);
     const usdFdTotalValue = useMemo(() => usdFd.reduce((acc, curr) => acc + curr.amount, 0), [usdFd]);
     const usdFdTotalValueCny = useMemo(() => usdFdTotalValue * data.referenceUsdRate, [usdFdTotalValue, data.referenceUsdRate]);
-    const totalFdValue = useMemo(() => cnyFdTotalValue + usdFdTotalValueCny, [cnyFdTotalValue, usdFdTotalValueCny]);
+    const totalFdValue = useMemo(() => cnyFdTotalValue + usdFdTotalValueCny + data.demandDepositAmount, [cnyFdTotalValue, usdFdTotalValueCny, data.demandDepositAmount]);
     const totalAssets = useMemo(() => goldTotalValue + totalFdValue, [goldTotalValue, totalFdValue]);
     const assetRatios = useMemo(() => {
-      if (totalAssets === 0) return { gold: 0, cnyFd: 0, usdFd: 0 };
+      if (totalAssets === 0) return { gold: 0, cnyFd: 0, demandDeposit: 0, usdFd: 0 };
       return { 
         gold: (goldTotalValue / totalAssets) * 100, 
         cnyFd: (cnyFdTotalValue / totalAssets) * 100,
+        demandDeposit: (data.demandDepositAmount / totalAssets) * 100,
         usdFd: (usdFdTotalValueCny / totalAssets) * 100
       };
-    }, [goldTotalValue, cnyFdTotalValue, usdFdTotalValueCny, totalAssets]);
-    const goldDashArray = useMemo(() => {
-      const radius = 35;
-      const circumference = 2 * Math.PI * radius;
-      return `${(assetRatios.gold / 100) * circumference} ${circumference}`;
-    }, [assetRatios.gold]);
-    const cnyFdDashArray = useMemo(() => {
-      const radius = 35;
-      const circumference = 2 * Math.PI * radius;
-      return `${(assetRatios.cnyFd / 100) * circumference} ${circumference}`;
-    }, [assetRatios.cnyFd]);
-    const usdFdDashArray = useMemo(() => {
-      const radius = 35;
-      const circumference = 2 * Math.PI * radius;
-      return `${(assetRatios.usdFd / 100) * circumference} ${circumference}`;
-    }, [assetRatios.usdFd]);
+    }, [goldTotalValue, cnyFdTotalValue, data.demandDepositAmount, usdFdTotalValueCny, totalAssets]);
     return (
       <div className="h-full flex flex-col bg-[#f2f2f7] dark:bg-black">
         <NavBar title="资产组合" />
@@ -649,12 +847,12 @@ const App: React.FC = () => {
                   </div>
                   <div className="flex items-center gap-2.5">
                     <div className="w-3 h-3 rounded-full bg-blue-500"></div>
-                    <span className="text-[11px] font-bold text-secondary">人民币存款</span>
-                    <span className={`text-[11px] font-black text-main ml-auto ${isPrivate ? 'blur-[3px]' : ''}`}>{f2(assetRatios.cnyFd)}%</span>
+                    <span className="text-[11px] font-bold text-secondary">人民币资产</span>
+                    <span className={`text-[11px] font-black text-main ml-auto ${isPrivate ? 'blur-[3px]' : ''}`}>{f2(assetRatios.cnyFd + assetRatios.demandDeposit)}%</span>
                   </div>
                   <div className="flex items-center gap-2.5">
                     <div className="w-3 h-3 rounded-full bg-green-500"></div>
-                    <span className="text-[11px] font-bold text-secondary">美元存款</span>
+                    <span className="text-[11px] font-bold text-secondary">美元资产</span>
                     <span className={`text-[11px] font-black text-main ml-auto ${isPrivate ? 'blur-[3px]' : ''}`}>{f2(assetRatios.usdFd)}%</span>
                   </div>
                 </div>
@@ -662,22 +860,19 @@ const App: React.FC = () => {
               <div className={`relative w-32 h-32 flex items-center justify-center flex-shrink-0 transition-all duration-500 ${isPrivate ? 'blur-xl' : ''}`}>
                 <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
                   <circle cx="50" cy="50" r="35" fill="transparent" strokeWidth="15" className="stroke-gray-300 dark:stroke-gray-700" />
-                  {/* Gold segment */}
                   <circle cx="50" cy="50" r="35" fill="transparent" strokeWidth="15" 
                     strokeDasharray={`${(assetRatios.gold / 100) * 2 * Math.PI * 35} ${2 * Math.PI * 35}`} 
-                    strokeLinecap="round" className="stroke-amber-500 dark:stroke-amber-600 transition-all duration-700" 
+                    strokeLinecap="butt" className="stroke-amber-500 dark:stroke-amber-600 transition-all duration-700" 
                   />
-                  {/* CNY FD segment */}
                   <circle cx="50" cy="50" r="35" fill="transparent" strokeWidth="15" 
-                    strokeDasharray={`${(assetRatios.cnyFd / 100) * 2 * Math.PI * 35} ${2 * Math.PI * 35}`} 
-                    strokeLinecap="round" className="stroke-blue-500 dark:stroke-blue-600 transition-all duration-700" 
+                    strokeDasharray={`${((assetRatios.cnyFd + assetRatios.demandDeposit) / 100) * 2 * Math.PI * 35} ${2 * Math.PI * 35}`} 
+                    strokeLinecap="butt" className="stroke-blue-500 dark:stroke-blue-600 transition-all duration-700" 
                     style={{ strokeDashoffset: `-${(assetRatios.gold / 100) * 2 * Math.PI * 35}` }} 
                   />
-                  {/* USD FD segment */}
                   <circle cx="50" cy="50" r="35" fill="transparent" strokeWidth="15" 
                     strokeDasharray={`${(assetRatios.usdFd / 100) * 2 * Math.PI * 35} ${2 * Math.PI * 35}`} 
-                    strokeLinecap="round" className="stroke-green-500 dark:stroke-green-600 transition-all duration-700" 
-                    style={{ strokeDashoffset: `-${((assetRatios.gold + assetRatios.cnyFd) / 100) * 2 * Math.PI * 35}` }} 
+                    strokeLinecap="butt" className="stroke-green-500 dark:stroke-green-600 transition-all duration-700" 
+                    style={{ strokeDashoffset: `-${((assetRatios.gold + assetRatios.cnyFd + assetRatios.demandDeposit) / 100) * 2 * Math.PI * 35}` }} 
                   />
                 </svg>
                 <div className="absolute inset-0 flex flex-col items-center justify-center"> <span className="text-[8px] font-black text-tertiary uppercase tracking-tighter">RATIO</span> </div>
@@ -691,7 +886,7 @@ const App: React.FC = () => {
                 <div className="flex items-center gap-5 text-left">
                   <div className="w-14 h-14 bg-amber-100 dark:bg-amber-900/30 rounded-2xl flex items-center justify-center text-amber-600 font-black text-lg shadow-sm shadow-amber-500/10">Au</div>
                   <div className="flex flex-col gap-1">
-                    <p className="font-bold text-xl text-main leading-none">黄金投资</p>
+                    <p className="font-bold text-xl text-main leading-none">黄金资产</p>
                     <div className="flex"> <div onClick={(e) => { e.stopPropagation(); setTempPrice(''); setShowPriceModal(true); }} className="bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 px-2 py-0.5 rounded-lg text-[10px] font-black active:scale-95 transition-all">¥{f2(data.referenceGoldPrice)}/g</div> </div>
                     <p className={`text-xs text-secondary font-bold transition-all ${isPrivate ? 'blur-[4px]' : ''}`}>持仓: {f2(goldAnalysis.reduce((a,c)=>a+c.currentWeight, 0))}g</p>
                   </div>
@@ -705,10 +900,10 @@ const App: React.FC = () => {
               <button onClick={() => setCurrentPage('fd')} className="w-full p-6 flex items-center justify-between active:bg-gray-50 dark:active:bg-gray-900 transition-all active:scale-[0.99]">
                 <div className="flex items-center gap-5 text-left">
                   <div className="w-14 h-14 bg-blue-100 dark:bg-blue-900/30 rounded-2xl flex items-center justify-center text-blue-600 font-black text-lg shadow-sm shadow-blue-500/10">CNY</div>
-                  <div> <p className="font-bold text-xl text-main leading-none">人民币存款</p> <p className={`text-xs text-secondary font-bold mt-1 transition-all ${isPrivate ? 'blur-[4px]' : ''}`}>{cnyFd.length} 笔存单</p> </div>
+                  <div> <p className="font-bold text-xl text-main leading-none">人民币资产</p> <p className={`text-xs text-secondary font-bold mt-1 transition-all ${isPrivate ? 'blur-[4px]' : ''}`}>{cnyFd.length} 笔存单</p> </div>
                 </div>
                 <div className="flex items-center gap-3">
-                  <p className={`font-black text-2xl text-main transition-all tracking-tighter ${isPrivate ? 'blur-md' : ''}`}>¥{f2(cnyFdTotalValue)}</p>
+                  <p className={`font-black text-2xl text-main transition-all tracking-tighter ${isPrivate ? 'blur-md' : ''}`}>¥{f2(cnyFdTotalValue + data.demandDepositAmount)}</p>
                   <ChevronRight className="text-tertiary" size={20} />
                 </div>
               </button>
@@ -717,7 +912,7 @@ const App: React.FC = () => {
                 <div className="flex items-center gap-5 text-left">
                   <div className="w-14 h-14 bg-green-100 dark:bg-green-900/30 rounded-2xl flex items-center justify-center text-green-600 font-black text-lg shadow-sm shadow-green-500/10">USD</div>
                   <div className="flex flex-col gap-1">
-                    <p className="font-bold text-xl text-main leading-none">美元存款</p>
+                    <p className="font-bold text-xl text-main leading-none">美元资产</p>
                     <div className="flex"> <div onClick={(e) => { e.stopPropagation(); setTempUsdRate(''); setShowUsdRateModal(true); }} className="bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 px-2 py-0.5 rounded-lg text-[10px] font-black active:scale-95 transition-all">¥{f2(data.referenceUsdRate)}/$</div> </div>
                     <p className={`text-xs text-secondary font-bold transition-all ${isPrivate ? 'blur-[4px]' : ''}`}>{usdFd.length} 笔存单</p>
                   </div>
@@ -730,6 +925,13 @@ const App: React.FC = () => {
                   <ChevronRight className="text-tertiary" size={20} />
                 </div>
               </button>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <p className="px-1 text-[11px] font-black text-secondary uppercase tracking-widest">总资产波动</p>
+            <div className="bg-white dark:bg-[#1c1c1e] rounded-[34px] border border-gray-100 dark:border-gray-800 p-5 shadow-sm">
+              <AssetTable />
             </div>
           </div>
         </div>
@@ -817,6 +1019,18 @@ const App: React.FC = () => {
           </div>
         </div>
         <div className="flex-1 overflow-y-auto p-5 space-y-5 pb-48 no-scrollbar relative">
+          <div className="bg-gradient-to-r from-purple-500 to-purple-600 p-7 rounded-[40px] shadow-lg shadow-purple-500/30">
+            <div className="flex items-center justify-between">
+              <div className="text-left">
+                <h3 className="text-xl font-black text-white tracking-tight">活期存款</h3>
+                <p className="text-[10px] font-bold text-white/70 uppercase tracking-widest mt-1">点击金额可修改</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <button onClick={() => { setTempDemandDeposit(data.demandDepositAmount.toString()); setShowDemandDepositModal(true); }} className="font-black text-3xl text-white tracking-tighter active:scale-95">¥{f2(data.demandDepositAmount)}</button>
+                <Edit2 className="text-white/80" size={20} />
+              </div>
+            </div>
+          </div>
           {sorted.map(fd => {
             const isExpired = fd.endDate <= today;
             return (
@@ -958,9 +1172,9 @@ const App: React.FC = () => {
       </div>
 
       {/* Gold Price Modal */}
-      <div className={`fixed inset-0 z-[400] flex items-center justify-center p-7 transition-opacity duration-300 ${showPriceModal ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-        <div className="absolute inset-0 bg-black/60 ios-blur" onClick={() => setShowPriceModal(false)}></div>
-        <div className={`bg-white dark:bg-[#1c1c1e] w-full max-w-sm rounded-[36px] p-7 shadow-2xl relative transition-transform duration-300 transform ${showPriceModal ? 'scale-100' : 'scale-90 opacity-0'}`}>
+      <div className={`fixed inset-0 z-[400] bg-black/60 ios-blur transition-opacity duration-150 ${showPriceModal ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} onClick={() => setShowPriceModal(false)}></div>
+      <div className={`fixed inset-0 z-[401] flex items-center justify-center p-7 transition-opacity duration-150 ${showPriceModal ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+        <div className={`bg-white dark:bg-[#1c1c1e] w-full max-w-sm rounded-[36px] p-7 shadow-2xl relative transition-transform duration-200 transform ${showPriceModal ? 'scale-100' : 'scale-95'}`}>
           <h3 className="text-xl font-black text-center mb-6 text-main tracking-tight">参考金价设置</h3>
           <div className="bg-gray-100 dark:bg-gray-800 rounded-2xl p-6 mb-7 relative">
             <input type="number" step="0.01" value={tempPrice} autoFocus placeholder="输入当前价" onChange={(e) => setTempPrice(e.target.value)} className="w-full bg-transparent text-center text-3xl font-black outline-none text-main placeholder:text-gray-400 pr-10" />
@@ -974,9 +1188,9 @@ const App: React.FC = () => {
       </div>
 
       {/* USD Rate Modal */}
-      <div className={`fixed inset-0 z-[400] flex items-center justify-center p-7 transition-opacity duration-300 ${showUsdRateModal ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-        <div className="absolute inset-0 bg-black/60 ios-blur" onClick={() => setShowUsdRateModal(false)}></div>
-        <div className={`bg-white dark:bg-[#1c1c1e] w-full max-w-sm rounded-[36px] p-7 shadow-2xl relative transition-transform duration-300 transform ${showUsdRateModal ? 'scale-100' : 'scale-90 opacity-0'}`}>
+      <div className={`fixed inset-0 z-[400] bg-black/60 ios-blur transition-opacity duration-150 ${showUsdRateModal ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} onClick={() => setShowUsdRateModal(false)}></div>
+      <div className={`fixed inset-0 z-[401] flex items-center justify-center p-7 transition-opacity duration-150 ${showUsdRateModal ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+        <div className={`bg-white dark:bg-[#1c1c1e] w-full max-w-sm rounded-[36px] p-7 shadow-2xl relative transition-transform duration-200 transform ${showUsdRateModal ? 'scale-100' : 'scale-95'}`}>
           <h3 className="text-xl font-black text-center mb-6 text-main tracking-tight">美元汇率设置</h3>
           <div className="bg-gray-100 dark:bg-gray-800 rounded-2xl p-6 mb-7 relative">
             <input type="number" step="0.01" value={tempUsdRate} autoFocus placeholder="输入当前汇率" onChange={(e) => setTempUsdRate(e.target.value)} className="w-full bg-transparent text-center text-3xl font-black outline-none text-main placeholder:text-gray-400 pr-10" />
@@ -985,6 +1199,22 @@ const App: React.FC = () => {
           <div className="flex gap-4">
             <button onClick={() => setShowUsdRateModal(false)} className="flex-1 py-4 rounded-2xl font-bold text-secondary bg-gray-100 dark:bg-gray-800 active:scale-95">取消</button>
             <button onClick={() => { const val = parseFloat(tempUsdRate); if (!isNaN(val) && val > 0) { updateData(d => ({ ...d, referenceUsdRate: val })); setShowUsdRateModal(false); } }} className="flex-1 py-4 rounded-2xl font-bold text-white bg-green-600 active:scale-95">确认保存</button>
+          </div>
+        </div>
+      </div>
+
+      {/* Demand Deposit Modal */}
+      <div className={`fixed inset-0 z-[400] bg-black/60 ios-blur transition-opacity duration-150 ${showDemandDepositModal ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} onClick={() => setShowDemandDepositModal(false)}></div>
+      <div className={`fixed inset-0 z-[401] flex items-center justify-center p-7 transition-opacity duration-150 ${showDemandDepositModal ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+        <div className={`bg-white dark:bg-[#1c1c1e] w-full max-w-sm rounded-[36px] p-7 shadow-2xl relative transition-transform duration-200 transform ${showDemandDepositModal ? 'scale-100' : 'scale-95'}`}>
+          <h3 className="text-xl font-black text-center mb-6 text-main tracking-tight">活期存款</h3>
+          <div className="bg-gray-100 dark:bg-gray-800 rounded-2xl p-6 mb-7 relative">
+            <input type="number" step="0.01" value={tempDemandDeposit} autoFocus placeholder="输入活期存款金额" onChange={(e) => setTempDemandDeposit(e.target.value)} className="w-full bg-transparent text-center text-3xl font-black outline-none text-main placeholder:text-gray-400 pr-10" />
+            <span className="absolute right-6 top-1/2 -translate-y-1/2 text-xs font-black text-tertiary">元</span>
+          </div>
+          <div className="flex gap-4">
+            <button onClick={() => setShowDemandDepositModal(false)} className="flex-1 py-4 rounded-2xl font-bold text-secondary bg-gray-100 dark:bg-gray-800 active:scale-95">取消</button>
+            <button onClick={() => { const val = parseFloat(tempDemandDeposit); if (!isNaN(val) && val >= 0) { updateData(d => ({ ...d, demandDepositAmount: val })); setShowDemandDepositModal(false); } }} className="flex-1 py-4 rounded-2xl font-bold text-white bg-purple-600 active:scale-95">确认保存</button>
           </div>
         </div>
       </div>
