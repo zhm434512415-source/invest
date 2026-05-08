@@ -4,6 +4,6 @@
     "dockerfile": "Dockerfile"
   },
   "run": {
-    "port": 5173
+    "port": 80
   }
 }
