@@ -1,9 +1,9 @@
 {
   "$schema": "https://zeabur.com/schema.json",
   "build": {
-    "command": "npm ci && npm run build"
+    "dockerfile": "Dockerfile"
   },
   "run": {
-    "command": "npm run preview -- --host 0.0.0.0 --port $PORT"
+    "port": 5173
   }
 }
