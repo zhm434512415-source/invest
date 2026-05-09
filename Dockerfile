@@ -1,4 +1,4 @@
-FROM node:18-alpine AS builder
+FROM node:18-alpine
 
 WORKDIR /app
 
@@ -10,12 +10,6 @@ COPY . .
 
 RUN npm run build
 
-FROM nginx:alpine
+EXPOSE ${PORT:-4173}
 
-COPY --from=builder /app/dist /usr/share/nginx/html
-
-COPY nginx.conf /etc/nginx/nginx.conf
-
-EXPOSE 80
-
-CMD ["nginx", "-g", "daemon off;"]
+CMD ["sh", "-c", "npx serve -s dist -l ${PORT:-4173}"]

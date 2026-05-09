@@ -1,10 +1,6 @@
 {
   "$schema": "https://zeabur.com/schema.json",
   "build": {
-    "command": "npm ci && npm run build",
-    "outputDirectory": "dist"
-  },
-  "run": {
-    "static": true
+    "dockerfile": "Dockerfile"
   }
 }
